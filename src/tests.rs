@@ -28,6 +28,8 @@ type Block = frame_system::mocking::MockBlock<TestRuntime>;
 // We create the constants `ALICE` and `BOB` to make it clear when we are representing users below.
 const ALICE: u64 = 1;
 const BOB: u64 = 2;
+#[allow(unused)]
+const DEFAULT_KITTY: Kitty<TestRuntime> = Kitty { dna: [0u8; 32], owner: 0 };
 
 #[runtime]
 mod runtime {
@@ -112,4 +114,83 @@ fn system_and_balances_work() {
 		assert_ok!(PalletBalances::mint_into(&ALICE, 100));
 		assert_ok!(PalletBalances::mint_into(&BOB, 100));
 	});
+}
+
+#[test]
+fn create_kitty_checks_signed() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(PalletKitties::create_kitty(RuntimeOrigin::signed(ALICE)));
+
+		assert_noop!(PalletKitties::create_kitty(RuntimeOrigin::none()), DispatchError::BadOrigin);
+	})
+}
+
+#[test]
+fn create_kitty_emits_event() {
+	new_test_ext().execute_with(|| {
+		System::set_block_number(1);
+
+		assert_ok!(PalletKitties::create_kitty(RuntimeOrigin::signed(ALICE)));
+
+		System::assert_last_event(Event::<TestRuntime>::Created { owner: 1 }.into());
+	})
+}
+
+#[test]
+fn count_for_kitties_created_correctly() {
+	new_test_ext().execute_with(|| {
+		assert_eq!(CountForKitties::<TestRuntime>::get(), 0);
+
+		CountForKitties::<TestRuntime>::set(1337u32);
+
+		CountForKitties::<TestRuntime>::put(1337u32);
+	})
+}
+
+#[test]
+fn mint_increments_count_for_kitty() {
+	new_test_ext().execute_with(|| {
+		assert_eq!(CountForKitties::<TestRuntime>::get(), 0);
+
+		assert_ok!(PalletKitties::create_kitty(RuntimeOrigin::signed(ALICE)));
+
+		assert_eq!(CountForKitties::<TestRuntime>::get(), 1);
+	})
+}
+
+#[test]
+fn mint_errors_when_overflow() {
+	new_test_ext().execute_with(|| {
+		CountForKitties::<TestRuntime>::set(u32::MAX);
+
+		assert_noop!(
+			PalletKitties::create_kitty(RuntimeOrigin::signed(1)),
+			Error::<TestRuntime>::TooManyKitties
+		);
+	})
+}
+
+#[test]
+fn kitties_map_created_correctly() {
+	new_test_ext().execute_with(|| {
+		let zero_key = [0u8; 32];
+		assert!(!Kitties::<TestRuntime>::contains_key(zero_key));
+		Kitties::<TestRuntime>::insert(zero_key, DEFAULT_KITTY);
+		assert!(Kitties::<TestRuntime>::contains_key(zero_key));
+	})
+}
+
+#[test]
+fn create_kitty_adds_to_map() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(PalletKitties::create_kitty(RuntimeOrigin::signed(ALICE)));
+		assert_eq!(Kitties::<TestRuntime>::iter().count(), 1);
+	})
+}
+#[test]
+fn cannot_mint_duplicate_kitty() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(PalletKitties::mint(ALICE, [0u8; 32]));
+		assert_noop!(PalletKitties::mint(BOB, [0u8; 32]), Error::<TestRuntime>::DuplicateKitty);
+	})
 }
