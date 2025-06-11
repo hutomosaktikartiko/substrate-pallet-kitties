@@ -3,6 +3,7 @@ use frame::prelude::*;
 use frame::primitives::BlakeTwo256;
 use frame::traits::Hash;
 
+// Learn about internal functions.
 impl<T: Config> Pallet<T> {
 	// Generates and returns DNA
 	pub fn gen_dna() -> [u8; 32] {
@@ -31,6 +32,31 @@ impl<T: Config> Pallet<T> {
 		Kitties::<T>::insert(dna, kitty);
 		CountForKitties::<T>::set(new_count);
 		Self::deposit_event(Event::<T>::Created { owner });
+		Ok(())
+	}
+
+	pub fn do_transfer(from: T::AccountId, to: T::AccountId, kitty_id: [u8; 32]) -> DispatchResult {
+		// Sanity check the transfer is allowed
+		ensure!(from != to, Error::<T>::TransferToSelf);
+		let mut kitty = Kitties::<T>::get(kitty_id).ok_or(Error::<T>::NoKitty)?;
+		ensure!(kitty.owner == from, Error::<T>::NotOwner);
+
+		// Update the owner of the kitty
+		kitty.owner = to.clone();
+		let mut to_owned = KittiesOwned::<T>::get(&to);
+		to_owned.try_push(kitty_id).map_err(|_| Error::<T>::TooManyOwned)?;
+		let mut from_owned = KittiesOwned::<T>::get(&from);
+		if let Some(ind) = from_owned.iter().position(|&id| id == kitty_id) {
+			from_owned.swap_remove(ind);
+		} else {
+			return Err(Error::<T>::NoKitty.into());
+		}
+
+		Kitties::<T>::insert(kitty_id, kitty);
+		KittiesOwned::<T>::insert(&to, to_owned);
+		KittiesOwned::<T>::insert(&from, from_owned);
+
+		Self::deposit_event(Event::<T>::Transferred { from, to, kitty_id });
 		Ok(())
 	}
 }
