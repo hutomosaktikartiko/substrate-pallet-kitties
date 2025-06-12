@@ -28,7 +28,7 @@ type Block = frame_system::mocking::MockBlock<TestRuntime>;
 // We create the constants `ALICE` and `BOB` to make it clear when we are representing users below.
 const ALICE: u64 = 1;
 const BOB: u64 = 2;
-const DEFAULT_KITTY: Kitty<TestRuntime> = Kitty { dna: [0u8; 32], owner: 0 };
+const DEFAULT_KITTY: Kitty<TestRuntime> = Kitty { dna: [0u8; 32], owner: 0, price: None };
 
 #[runtime]
 mod runtime {
@@ -81,6 +81,7 @@ impl pallet_balances::Config for TestRuntime {
 // will also need to update this configuration to represent that.
 impl pallet_kitties::Config for TestRuntime {
 	type RuntimeEvent = RuntimeEvent;
+	type NativeBalance = PalletBalances;
 }
 
 // We need to run most of our tests using this function: `new_test_ext().execute_with(|| { ... });`
@@ -262,6 +263,52 @@ fn transfer_emits_event() {
 		assert_ok!(PalletKitties::transfer(RuntimeOrigin::signed(ALICE), BOB, kitty_id));
 		System::assert_last_event(
 			Event::<TestRuntime>::Transferred { from: ALICE, to: BOB, kitty_id }.into(),
+		);
+	});
+}
+
+#[test]
+fn transfer_logic_works() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(PalletKitties::create_kitty(RuntimeOrigin::signed(ALICE)));
+
+		let kitty = &Kitties::<TestRuntime>::iter_values().collect::<Vec<_>>()[0];
+		let kitty_id = kitty.dna;
+		assert_eq!(kitty.owner, ALICE);
+		assert_eq!(KittiesOwned::<TestRuntime>::get(ALICE), vec![kitty_id]);
+		assert_eq!(KittiesOwned::<TestRuntime>::get(BOB), vec![]);
+
+		assert_noop!(
+			PalletKitties::transfer(RuntimeOrigin::signed(ALICE), ALICE, kitty_id),
+			Error::<TestRuntime>::TransferToSelf
+		);
+
+		assert_noop!(
+			PalletKitties::transfer(RuntimeOrigin::signed(ALICE), BOB, [0u8; 32]),
+			Error::<TestRuntime>::NoKitty
+		);
+
+		assert_noop!(
+			PalletKitties::transfer(RuntimeOrigin::signed(BOB), ALICE, kitty_id),
+			Error::<TestRuntime>::NotOwner
+		);
+
+		assert_ok!(PalletKitties::transfer(RuntimeOrigin::signed(ALICE), BOB, kitty_id));
+
+		assert_eq!(KittiesOwned::<TestRuntime>::get(ALICE), vec![]);
+		assert_eq!(KittiesOwned::<TestRuntime>::get(BOB), vec![kitty_id]);
+		let kitty = &Kitties::<TestRuntime>::iter_values().collect::<Vec<_>>()[0];
+		assert_eq!(kitty.owner, BOB);
+	});
+}
+
+#[test]
+fn native_balance_associated_type_works() {
+	new_test_ext().execute_with(|| {
+		assert_ok!(<<TestRuntime as Config>::NativeBalance as Mutate<_>>::mint_into(&ALICE, 1337));
+		assert_eq!(
+			<<TestRuntime as Config>::NativeBalance as Inspect<_>>::total_balance(&ALICE),
+			1337
 		);
 	});
 }
